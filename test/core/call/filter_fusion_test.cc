@@ -16,10 +16,15 @@
 
 #include <grpc/impl/grpc_types.h>
 
+#include <memory>
 #include <type_traits>
 
 #include "gmock/gmock.h"
 #include "gtest/gtest.h"
+#include "absl/log/log.h"
+#include "absl/status/status.h"
+#include "absl/log/log.h"
+#include "absl/status/status.h"
 #include "src/core/lib/channel/promise_based_filter.h"
 #include "src/core/lib/transport/call_final_info.h"
 #include "src/core/lib/transport/transport.h"
@@ -35,6 +40,11 @@ std::vector<std::string> history;
 
 class Test1 : public ImplementChannelFilter<Test1> {
  public:
+  static absl::string_view TypeName() { return "Test1"; }
+  static absl::StatusOr<std::unique_ptr<Test1>> Create(
+      const ChannelArgs& /*args*/, ChannelFilter::Args /*filter_args*/) {
+    return std::make_unique<Test1>();
+  }
   class Call {
    public:
     void OnClientInitialMetadata(ClientMetadata&) {
@@ -71,6 +81,11 @@ class Test1 : public ImplementChannelFilter<Test1> {
 
 class Test2 : public ImplementChannelFilter<Test2> {
  public:
+  static absl::string_view TypeName() { return "Test2"; }
+  static absl::StatusOr<std::unique_ptr<Test2>> Create(
+      const ChannelArgs& /*args*/, ChannelFilter::Args /*filter_args*/) {
+    return std::make_unique<Test2>();
+  }
   class Call {
    public:
     void OnClientInitialMetadata(const ClientMetadata&) {
@@ -107,6 +122,11 @@ class Test2 : public ImplementChannelFilter<Test2> {
 
 class Test3 : public ImplementChannelFilter<Test3> {
  public:
+  static absl::string_view TypeName() { return "Test3"; }
+  static absl::StatusOr<std::unique_ptr<Test3>> Create(
+      const ChannelArgs& /*args*/, ChannelFilter::Args /*filter_args*/) {
+    return std::make_unique<Test3>();
+  }
   class Call {
    public:
     absl::Status OnClientInitialMetadata(const ClientMetadata&) {
@@ -148,6 +168,11 @@ class Test3 : public ImplementChannelFilter<Test3> {
 
 class Test4 : public ImplementChannelFilter<Test4> {
  public:
+  static absl::string_view TypeName() { return "Test4"; }
+  static absl::StatusOr<std::unique_ptr<Test4>> Create(
+      const ChannelArgs& /*args*/, ChannelFilter::Args /*filter_args*/) {
+    return std::make_unique<Test4>();
+  }
   class Call {
    public:
     ServerMetadataHandle OnClientInitialMetadata(const ClientMetadata&,
@@ -182,6 +207,11 @@ class Test4 : public ImplementChannelFilter<Test4> {
 
 class Test5 : public ImplementChannelFilter<Test5> {
  public:
+  static absl::string_view TypeName() { return "Test5"; }
+  static absl::StatusOr<std::unique_ptr<Test5>> Create(
+      const ChannelArgs& /*args*/, ChannelFilter::Args /*filter_args*/) {
+    return std::make_unique<Test5>();
+  }
   class Call {
    public:
     void OnClientInitialMetadata(ClientMetadata&, Test5* filter) {
@@ -210,7 +240,40 @@ class Test5 : public ImplementChannelFilter<Test5> {
   }
 };
 
+class Test6 : public ImplementChannelFilter<Test5> {
+ public:
+  static absl::string_view TypeName() { return "Test5"; }
+  static absl::StatusOr<std::unique_ptr<Test6>> Create(
+      const ChannelArgs& /*args*/, ChannelFilter::Args /*filter_args*/) {
+    return absl::UnimplementedError("Test6 is not implemented");
+  }
+  class Call {
+   public:
+    static inline const NoInterceptor OnClientInitialMetadata;
+    static inline const NoInterceptor OnServerInitialMetadata;
+    static inline const NoInterceptor OnClientToServerMessage;
+    static inline const NoInterceptor OnServerToClientMessage;
+    static inline const NoInterceptor OnClientToServerHalfClose;
+    static inline const NoInterceptor OnServerTrailingMetadata;
+    static inline const NoInterceptor OnFinalize;
+
+   private:
+  };
+
+  bool StartTransportOp(grpc_transport_op* op) override {
+    LOG(FATAL) << "Test6::StartTransportOp should not be called";
+    return false;
+  }
+
+  bool GetChannelInfo(const grpc_channel_info* info) override {
+    LOG(FATAL) << "Test6::GetChannelInfo should not be called";
+    return false;
+  }
+};
+
 using TestFusedFilter = FusedFilter<Test1, Test2, Test3, Test4, Test5>;
+using TestFailedFusedFilter =
+    FusedFilter<Test1, Test2, Test3, Test4, Test5, Test6>;
 
 static_assert(
     !std::is_same_v<decltype(&TestFusedFilter::Call::OnClientInitialMetadata),
@@ -248,7 +311,9 @@ typename ServerMetadataOrHandle<T>::ValueType RunSuccessfulPromise(
 
 TEST(FusedFilterTest, ClientFilterTest) {
   history.clear();
-  TestFusedFilter filter;
+  ASSERT_OK_AND_ASSIGN(
+      std::unique_ptr<TestFusedFilter> filter,
+      TestFusedFilter::Create(ChannelArgs(), ChannelFilter::Args()));
   TestFusedFilter::Call call;
   history.clear();
   auto message = Arena::MakePooled<Message>();
@@ -257,16 +322,16 @@ TEST(FusedFilterTest, ClientFilterTest) {
   auto client_metadata_handle = Arena::MakePooled<ClientMetadata>();
   struct grpc_call_final_info info;
   message = RunSuccessfulPromise<Message>(
-      call.OnClientToServerMessage(std::move(message), &filter));
+      call.OnClientToServerMessage(std::move(message), filter.get()));
   RunSuccessfulPromise<Message>(
-      call.OnServerToClientMessage(std::move(message), &filter));
+      call.OnServerToClientMessage(std::move(message), filter.get()));
   RunSuccessfulPromise<ServerMetadata>(
-      call.OnServerInitialMetadata(std::move(server_metadata_handle), &filter));
+      call.OnServerInitialMetadata(std::move(server_metadata_handle), filter.get()));
   RunSuccessfulPromise<ClientMetadata>(
-      call.OnClientInitialMetadata(std::move(client_metadata_handle), &filter));
-  call.OnServerTrailingMetadata(*server_trailing_metadata_handle, &filter);
+      call.OnClientInitialMetadata(std::move(client_metadata_handle), filter.get()));
+  call.OnServerTrailingMetadata(*server_trailing_metadata_handle, filter.get());
   call.OnClientToServerHalfClose();
-  call.OnFinalize(&info, &filter);
+  call.OnFinalize(&info, filter.get());
   EXPECT_THAT(
       history,
       ElementsAre("Test2::Call::OnClientToServerMessage",
@@ -294,13 +359,26 @@ TEST(FusedFilterTest, ClientFilterTest) {
   history.clear();
   grpc_transport_op op;
   grpc_channel_info channel_info;
-  EXPECT_TRUE(filter.StartTransportOp(&op));
-  EXPECT_TRUE(filter.GetChannelInfo(&channel_info));
+  EXPECT_TRUE(filter->StartTransportOp(&op));
+  EXPECT_TRUE(filter->GetChannelInfo(&channel_info));
   EXPECT_THAT(history,
               ElementsAre("Test1::StartTransportOp", "Test2::StartTransportOp",
                           "Test3::StartTransportOp", "Test4::StartTransportOp",
                           "Test1::GetChannelInfo", "Test2::GetChannelInfo",
                           "Test3::GetChannelInfo", "Test4::GetChannelInfo"));
+}
+
+TEST(FusedFilterTest, FusedFilterTypeName) {
+  EXPECT_EQ(TestFusedFilter::TypeName(),
+            "Fused_Filter_Test1_Test2_Test3_Test4_Test5");
+}
+
+// Assert that the fused filter creation fails when one of the filters creation
+// fails.
+TEST(FusedFilterTest, FailedFusedFilter) {
+  EXPECT_THAT(
+      TestFailedFusedFilter::Create(ChannelArgs(), ChannelFilter::Args()),
+      ::testing::status::StatusIs(absl::StatusCode::kUnimplemented));
 }
 
 }  // namespace

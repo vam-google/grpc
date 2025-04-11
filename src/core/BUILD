@@ -9132,7 +9132,10 @@ grpc_cc_library(
     ],
     external_deps = [
         "absl/status",
+        "absl/strings",
+        "absl/log:check",
         "absl/log",
+        "absl/memory",
     ],
     deps = [
         "call_filters",
