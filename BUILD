@@ -1842,6 +1842,7 @@ grpc_cc_library(
         "absl/log",
         "absl/log:check",
         "absl/meta:type_traits",
+        "absl/numeric:bits",
         "absl/status",
         "absl/status:statusor",
         "absl/strings",

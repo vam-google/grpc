@@ -19,7 +19,7 @@
 #include <stdint.h>
 #include <string.h>
 
-#include "absl/base/internal/endian.h"
+#include "absl/numeric/bits.h"
 #include "absl/strings/string_view.h"
 
 namespace grpc_observability {
@@ -52,8 +52,7 @@ class RpcServerStatsEncoding {
       *time = 0;
       return kEncodeDecodeFailure;
     }
-    *time = absl::little_endian::Load64(
-        &buf[kServerElapsedTimeOffset + kFieldIdSize]);
+    *time = LittleEndianLoad64(&buf[kServerElapsedTimeOffset + kFieldIdSize]);
     return kRpcServerStatsSize;
   }
 
@@ -68,8 +67,7 @@ class RpcServerStatsEncoding {
 
     buf[kVersionIdOffset] = kVersionId;
     buf[kServerElapsedTimeOffset] = kServerElapsedTimeField;
-    absl::little_endian::Store64(&buf[kServerElapsedTimeOffset + kFieldIdSize],
-                                 time);
+    LittleEndianStore64(&buf[kServerElapsedTimeOffset + kFieldIdSize], time);
     return kRpcServerStatsSize;
   }
 
@@ -100,6 +98,22 @@ class RpcServerStatsEncoding {
   RpcServerStatsEncoding(RpcServerStatsEncoding&&) = delete;
   RpcServerStatsEncoding operator=(const RpcServerStatsEncoding&) = delete;
   RpcServerStatsEncoding operator=(RpcServerStatsEncoding&&) = delete;
+
+  static inline uint64_t LittleEndianLoad64(const char* p) {
+    uint64_t v;
+    memcpy(&v, p, sizeof(v));
+    if constexpr (absl::endian::native != absl::endian::little) {
+      v = absl::byteswap(v);
+    }
+    return v;
+  }
+
+  static inline void LittleEndianStore64(char* p, uint64_t v) {
+    if constexpr (absl::endian::native != absl::endian::little) {
+      v = absl::byteswap(v);
+    }
+    memcpy(p, &v, sizeof(v));
+  }
 };
 
 }  // namespace grpc_observability
